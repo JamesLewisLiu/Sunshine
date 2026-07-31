@@ -695,7 +695,8 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td>Description</td>
         <td colspan="2">
             When enabled on Windows, Sunshine maps native touch input to the current primary display instead of the
-            streamed display while preserving the relative touch position.
+            streamed display while preserving the relative touch position. Physical display bounds are used so the
+            mapping covers the full primary display even when display resolutions or Windows scaling settings differ.
             <br>
             This setting does not affect pen, absolute mouse, or relative mouse input. If Sunshine cannot determine
             valid primary display dimensions, touch input falls back to the streamed display.

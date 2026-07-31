@@ -18,6 +18,8 @@
 
 // standard includes
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -48,16 +50,46 @@ namespace platf {
     65535
   };
 
-  std::optional<touch_port_t> win_input::make_primary_display_touch_port(const display_metrics_t &metrics) {
-    if (metrics.primary_width <= 0 || metrics.primary_height <= 0) {
+  std::optional<touch_port_t> win_input::make_primary_display_touch_port(std::span<const display_bounds_t> displays) {
+    if (displays.empty()) {
+      return std::nullopt;
+    }
+
+    const display_bounds_t *primary_display = nullptr;
+    auto virtual_origin_x = std::numeric_limits<int>::max();
+    auto virtual_origin_y = std::numeric_limits<int>::max();
+
+    for (const auto &display : displays) {
+      if (display.width <= 0 || display.height <= 0) {
+        return std::nullopt;
+      }
+
+      virtual_origin_x = std::min(virtual_origin_x, display.offset_x);
+      virtual_origin_y = std::min(virtual_origin_y, display.offset_y);
+
+      if (display.is_primary) {
+        if (primary_display) {
+          return std::nullopt;
+        }
+        primary_display = &display;
+      }
+    }
+
+    if (!primary_display) {
+      return std::nullopt;
+    }
+
+    const auto primary_offset_x = static_cast<std::int64_t>(primary_display->offset_x) - virtual_origin_x;
+    const auto primary_offset_y = static_cast<std::int64_t>(primary_display->offset_y) - virtual_origin_y;
+    if (primary_offset_x > std::numeric_limits<int>::max() || primary_offset_y > std::numeric_limits<int>::max()) {
       return std::nullopt;
     }
 
     return touch_port_t {
-      -metrics.virtual_origin_x,
-      -metrics.virtual_origin_y,
-      metrics.primary_width,
-      metrics.primary_height,
+      static_cast<int>(primary_offset_x),
+      static_cast<int>(primary_offset_y),
+      primary_display->width,
+      primary_display->height,
       0,
       0
     };
@@ -74,6 +106,52 @@ namespace platf {
 
     return *primary_touch_port;
   }
+
+  namespace {
+    /**
+     * @brief Query physical bounds for attached Windows displays and build the primary-display touch port.
+     *
+     * @return Primary-display touch port, or `std::nullopt` when the current topology cannot be queried.
+     */
+    std::optional<touch_port_t> query_primary_display_touch_port() {
+      std::vector<win_input::display_bounds_t> displays;
+
+      for (DWORD display_index = 0;; ++display_index) {
+        DISPLAY_DEVICEW display_device {};
+        display_device.cb = sizeof(display_device);
+        if (!EnumDisplayDevicesW(nullptr, display_index, &display_device, 0)) {
+          break;
+        }
+
+        if (!(display_device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) || (display_device.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER)) {
+          continue;
+        }
+
+        DEVMODEW display_mode {};
+        display_mode.dmSize = sizeof(display_mode);
+        if (!EnumDisplaySettingsExW(display_device.DeviceName, ENUM_CURRENT_SETTINGS, &display_mode, 0)) {
+          return std::nullopt;
+        }
+
+        constexpr DWORD required_fields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
+        if ((display_mode.dmFields & required_fields) != required_fields ||
+            display_mode.dmPelsWidth > static_cast<DWORD>(std::numeric_limits<int>::max()) ||
+            display_mode.dmPelsHeight > static_cast<DWORD>(std::numeric_limits<int>::max())) {
+          return std::nullopt;
+        }
+
+        displays.push_back({
+          static_cast<int>(display_mode.dmPosition.x),
+          static_cast<int>(display_mode.dmPosition.y),
+          static_cast<int>(display_mode.dmPelsWidth),
+          static_cast<int>(display_mode.dmPelsHeight),
+          (display_device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0
+        });
+      }
+
+      return win_input::make_primary_display_touch_port(displays);
+    }
+  }  // namespace
 
   /**
    * @brief ViGEm client pointer released with `vigem_free`.
@@ -1042,15 +1120,10 @@ namespace platf {
 
     std::optional<touch_port_t> primary_touch_port;
     if (config::input.touch_send_to_primary_display) {
-      primary_touch_port = win_input::make_primary_display_touch_port({
-        GetSystemMetrics(SM_XVIRTUALSCREEN),
-        GetSystemMetrics(SM_YVIRTUALSCREEN),
-        GetSystemMetrics(SM_CXSCREEN),
-        GetSystemMetrics(SM_CYSCREEN),
-      });
+      primary_touch_port = query_primary_display_touch_port();
 
       if (!primary_touch_port && !raw->primaryTouchPortWarningLogged) {
-        BOOST_LOG(warning) << "Unable to target the primary display for touch input due to invalid display metrics; using the streamed display instead"sv;
+        BOOST_LOG(warning) << "Unable to target the primary display for touch input due to an invalid physical display topology; using the streamed display instead"sv;
         raw->primaryTouchPortWarningLogged = true;
       } else if (primary_touch_port) {
         raw->primaryTouchPortWarningLogged = false;

@@ -6,28 +6,30 @@
 
 // standard includes
 #include <optional>
+#include <span>
 
 // local includes
 #include "src/platform/common.h"
 
 namespace platf::win_input {
   /**
-   * @brief Windows display metrics used to locate the primary display in the virtual desktop.
+   * @brief Physical bounds of an attached Windows display.
    */
-  struct display_metrics_t {
-    int virtual_origin_x;  ///< Horizontal origin of the virtual desktop in screen coordinates.
-    int virtual_origin_y;  ///< Vertical origin of the virtual desktop in screen coordinates.
-    int primary_width;  ///< Width of the primary display in physical pixels.
-    int primary_height;  ///< Height of the primary display in physical pixels.
+  struct display_bounds_t {
+    int offset_x;  ///< Horizontal display offset in physical virtual-desktop coordinates.
+    int offset_y;  ///< Vertical display offset in physical virtual-desktop coordinates.
+    int width;  ///< Display width in physical pixels.
+    int height;  ///< Display height in physical pixels.
+    bool is_primary;  ///< Whether Windows marks this display as the primary display.
   };
 
   /**
    * @brief Build a touch port targeting the Windows primary display.
    *
-   * @param metrics Current primary-display and virtual-desktop metrics.
-   * @return Primary-display touch port, or `std::nullopt` when the dimensions are invalid.
+   * @param displays Physical bounds of the currently attached displays.
+   * @return Primary-display touch port, or `std::nullopt` when the display topology is invalid.
    */
-  std::optional<touch_port_t> make_primary_display_touch_port(const display_metrics_t &metrics);
+  std::optional<touch_port_t> make_primary_display_touch_port(std::span<const display_bounds_t> displays);
 
   /**
    * @brief Select the touch port used for native Windows touch injection.
