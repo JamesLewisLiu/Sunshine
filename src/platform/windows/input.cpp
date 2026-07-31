@@ -25,6 +25,7 @@
 #include <ViGEm/Client.h>
 
 // local includes
+#include "input_utils.h"
 #include "keylayout.h"
 #include "misc.h"
 #include "src/config.h"
@@ -46,6 +47,33 @@ namespace platf {
     65535,
     65535
   };
+
+  std::optional<touch_port_t> win_input::make_primary_display_touch_port(const display_metrics_t &metrics) {
+    if (metrics.primary_width <= 0 || metrics.primary_height <= 0) {
+      return std::nullopt;
+    }
+
+    return touch_port_t {
+      -metrics.virtual_origin_x,
+      -metrics.virtual_origin_y,
+      metrics.primary_width,
+      metrics.primary_height,
+      0,
+      0
+    };
+  }
+
+  touch_port_t win_input::select_touch_port(
+    const touch_port_t &streamed_touch_port,
+    bool send_to_primary_display,
+    const std::optional<touch_port_t> &primary_touch_port
+  ) {
+    if (!send_to_primary_display || !primary_touch_port) {
+      return streamed_touch_port;
+    }
+
+    return *primary_touch_port;
+  }
 
   /**
    * @brief ViGEm client pointer released with `vigem_free`.
@@ -766,6 +794,7 @@ namespace platf {
     POINTER_TYPE_INFO touchInfo[10] {};  ///< Touch info.
     UINT32 activeTouchSlots {};  ///< Active touch slots.
     thread_pool_util::ThreadPool::task_id_t touchRepeatTask {};  ///< Touch repeat task.
+    bool primaryTouchPortWarningLogged {};  ///< Whether invalid primary-display metrics have already been logged.
   };
 
   /**
@@ -1011,6 +1040,33 @@ namespace platf {
       return;
     }
 
+    std::optional<touch_port_t> primary_touch_port;
+    if (config::input.touch_send_to_primary_display) {
+      primary_touch_port = win_input::make_primary_display_touch_port({
+        GetSystemMetrics(SM_XVIRTUALSCREEN),
+        GetSystemMetrics(SM_YVIRTUALSCREEN),
+        GetSystemMetrics(SM_CXSCREEN),
+        GetSystemMetrics(SM_CYSCREEN),
+      });
+
+      if (!primary_touch_port && !raw->primaryTouchPortWarningLogged) {
+        BOOST_LOG(warning) << "Unable to target the primary display for touch input due to invalid display metrics; using the streamed display instead"sv;
+        raw->primaryTouchPortWarningLogged = true;
+      } else if (primary_touch_port) {
+        raw->primaryTouchPortWarningLogged = false;
+      }
+    } else {
+      raw->primaryTouchPortWarningLogged = false;
+    }
+
+    // Keep this selection local to native touch injection so pen and mouse input
+    // continue using the streamed display's touch port.
+    const auto selected_touch_port = win_input::select_touch_port(
+      touch_port,
+      config::input.touch_send_to_primary_display,
+      primary_touch_port
+    );
+
     // Find or allocate an entry for this touch pointer ID
     auto pointer = pointer_by_id(raw, touch.pointerId, touch.eventType);
     if (!pointer) {
@@ -1025,7 +1081,7 @@ namespace platf {
     touchInfo.pointerInfo.pointerType = PT_TOUCH;
 
     // Populate shared pointer info fields
-    populate_common_pointer_info(touchInfo.pointerInfo, touch_port, touch.eventType, touch.x, touch.y);
+    populate_common_pointer_info(touchInfo.pointerInfo, selected_touch_port, touch.eventType, touch.x, touch.y);
 
     touchInfo.touchMask = TOUCH_MASK_NONE;
 
@@ -1058,10 +1114,10 @@ namespace platf {
         float contactHeight = (std::sin(majorAxisAngle) * touch.contactAreaMajor) + (std::sin(minorAxisAngle) * touch.contactAreaMinor);
 
         // Convert into screen coordinates centered at the touch location and constrained by screen dimensions
-        touchInfo.rcContact.left = std::max<LONG>(touch_port.offset_x, touchInfo.pointerInfo.ptPixelLocation.x - std::floor(contactWidth / 2));
-        touchInfo.rcContact.right = std::min<LONG>(touch_port.offset_x + touch_port.width, touchInfo.pointerInfo.ptPixelLocation.x + std::ceil(contactWidth / 2));
-        touchInfo.rcContact.top = std::max<LONG>(touch_port.offset_y, touchInfo.pointerInfo.ptPixelLocation.y - std::floor(contactHeight / 2));
-        touchInfo.rcContact.bottom = std::min<LONG>(touch_port.offset_y + touch_port.height, touchInfo.pointerInfo.ptPixelLocation.y + std::ceil(contactHeight / 2));
+        touchInfo.rcContact.left = std::max<LONG>(selected_touch_port.offset_x, touchInfo.pointerInfo.ptPixelLocation.x - std::floor(contactWidth / 2));
+        touchInfo.rcContact.right = std::min<LONG>(selected_touch_port.offset_x + selected_touch_port.width, touchInfo.pointerInfo.ptPixelLocation.x + std::ceil(contactWidth / 2));
+        touchInfo.rcContact.top = std::max<LONG>(selected_touch_port.offset_y, touchInfo.pointerInfo.ptPixelLocation.y - std::floor(contactHeight / 2));
+        touchInfo.rcContact.bottom = std::min<LONG>(selected_touch_port.offset_y + selected_touch_port.height, touchInfo.pointerInfo.ptPixelLocation.y + std::ceil(contactHeight / 2));
 
         touchInfo.touchMask |= TOUCH_MASK_CONTACTAREA;
       }

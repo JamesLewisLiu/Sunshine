@@ -394,6 +394,8 @@
     "sw_tune_zerolatency": "zerolatency -- good for fast encoding and low-latency streaming (default)",
     "system_tray": "Enable system tray",
     "system_tray_desc": "Show icon in system tray and display desktop notifications",
+    "touch_send_to_primary_display": "Send Touch Input to the Primary Display",
+    "touch_send_to_primary_display_desc": "When enabled on Windows, Sunshine maps native touch input to the current primary display instead of the streamed display while preserving the relative touch position. This setting does not affect pen or mouse input.",
     "touchpad_as_ds4": "Emulate a DS4 gamepad if the client gamepad reports a touchpad is present",
     "touchpad_as_ds4_desc": "If disabled, touchpad presence will not be taken into account during gamepad type selection.",
     "upnp": "UPnP",

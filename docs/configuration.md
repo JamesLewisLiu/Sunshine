@@ -688,6 +688,33 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### touch_send_to_primary_display
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            When enabled on Windows, Sunshine maps native touch input to the current primary display instead of the
+            streamed display while preserving the relative touch position.
+            <br>
+            This setting does not affect pen, absolute mouse, or relative mouse input. If Sunshine cannot determine
+            valid primary display dimensions, touch input falls back to the streamed display.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            touch_send_to_primary_display = enabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### keybindings
 
 <table>
