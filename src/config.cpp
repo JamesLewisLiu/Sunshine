@@ -853,11 +853,13 @@ namespace config {
     true,  // ds5_inputtino_randomize_mac
 
     true,  // keyboard enabled
+    false,  // map right Alt to the Windows key
     true,  // mouse enabled
     true,  // controller enabled
     true,  // always send scancodes
     true,  // high resolution scrolling
     true,  // native pen/touch support
+    false,  // send touch input to the primary display
   };
 
   /**
