@@ -27,6 +27,8 @@ namespace platf::win_input {
 
   /**
    * @brief Build a touch port targeting the Windows primary display.
+   * @details The returned offset is relative to the virtual desktop's top-left corner, matching Sunshine's
+   * nonnegative touch-port coordinate system even when Windows reports displays at negative coordinates.
    *
    * @param displays Physical bounds of the currently attached displays.
    * @return Primary-display touch port, or `std::nullopt` when the display topology is invalid.
@@ -49,6 +51,8 @@ namespace platf::win_input {
 
   /**
    * @brief Map normalized native-touch coordinates to a pixel inside a Windows display.
+   * @details Coordinates outside the normalized content, including client-side black bars, are clamped to the
+   * nearest pixel of the selected display.
    *
    * @param touch_port Physical bounds of the selected touch target.
    * @param normalized_x Horizontal coordinate in normalized video coordinates.
@@ -59,6 +63,8 @@ namespace platf::win_input {
 
   /**
    * @brief Add Windows compatibility flags for a native touch event.
+   * @details Active contacts receive the mouse-compatible first-button flag. The first contact in an interaction
+   * also receives the Windows primary-pointer flag.
    *
    * @param pointer_flags Existing Windows pointer flags after applying the event state transition.
    * @param event_type Moonlight touch event type.

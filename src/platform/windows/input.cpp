@@ -51,8 +51,14 @@ namespace platf {
     65535
   };
 
-  // These are edge-triggered pointer state flags that should always be cleared next frame.
-  constexpr auto EDGE_TRIGGERED_POINTER_FLAGS = POINTER_FLAG_DOWN | POINTER_FLAG_UP | POINTER_FLAG_CANCELED | POINTER_FLAG_UPDATE;  ///< Protocol or platform constant for edge-triggered pointer flags.
+  /**
+   * @brief Windows pointer flags that are valid only for the frame in which they are injected.
+   */
+  constexpr auto EDGE_TRIGGERED_POINTER_FLAGS =
+    POINTER_FLAG_DOWN |
+    POINTER_FLAG_UP |
+    POINTER_FLAG_CANCELED |
+    POINTER_FLAG_UPDATE;
 
   std::optional<touch_port_t> win_input::make_primary_display_touch_port(std::span<const display_bounds_t> displays) {
     if (displays.empty()) {
@@ -83,6 +89,8 @@ namespace platf {
       return std::nullopt;
     }
 
+    // Windows positions displays relative to the primary display and may report negative coordinates. Sunshine's
+    // touch ports are relative to the top-left of the virtual desktop, so translate to that nonnegative space.
     const auto primary_offset_x = static_cast<std::int64_t>(primary_display->offset_x) - virtual_origin_x;
     const auto primary_offset_y = static_cast<std::int64_t>(primary_display->offset_y) - virtual_origin_y;
     if (primary_offset_x > std::numeric_limits<int>::max() || primary_offset_y > std::numeric_limits<int>::max()) {
@@ -122,6 +130,8 @@ namespace platf {
       }
 
       normalized_coordinate = std::clamp(normalized_coordinate, 0.0f, 1.0f);
+      // A normalized coordinate of 1.0 is the far edge of this display. Select its final pixel rather than the first
+      // pixel of a neighboring display.
       const auto pixel_offset = std::min(static_cast<int>(normalized_coordinate * extent), extent - 1);
       return offset + pixel_offset;
     };
@@ -1199,6 +1209,7 @@ namespace platf {
 
     bool designate_primary_touch = touch.eventType == LI_TOUCH_EVENT_DOWN;
     if (designate_primary_touch) {
+      // Windows permits only one primary pointer during an active touch interaction.
       for (const auto &active_pointer : raw->touchInfo) {
         if (win_input::touch_pointer_blocks_primary_designation(active_pointer.touchInfo.pointerInfo.pointerFlags)) {
           designate_primary_touch = false;

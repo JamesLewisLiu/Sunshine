@@ -1087,6 +1087,8 @@ namespace input {
   }
 
   std::optional<platf::touch_port_t> monitor_touch_port(const input::touch_port_t &touch_port, std::pair<float, float> &coords, bool use_effective_content) {
+    // client_to_touchport() has already subtracted the leading client padding from the coordinates. Remove padding
+    // from both sides of the encoded extent here so effective-content coordinates still normalize to 0.0-1.0.
     const float frame_logical_w = (touch_port.width * touch_port.scalar_inv) / touch_port.scalar_tpcoords;
     const float frame_logical_h = (touch_port.height * touch_port.scalar_inv) / touch_port.scalar_tpcoords;
     const float content_width = touch_port.width - (2.0f * touch_port.client_offsetX);
@@ -1103,6 +1105,8 @@ namespace input {
     coords.first = (coords.first - touch_port.offset_x) / normalization_width;
     coords.second = (coords.second - touch_port.offset_y) / normalization_height;
     if (use_effective_content) {
+      // client_to_touchport() maps encoded padding to the content edges. Keep those edge coordinates inside the
+      // normalized target so native touch cannot escape onto an adjacent display.
       coords.first = std::clamp(coords.first, 0.0f, 1.0f);
       coords.second = std::clamp(coords.second, 0.0f, 1.0f);
     }
