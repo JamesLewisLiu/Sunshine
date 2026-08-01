@@ -1128,7 +1128,7 @@ namespace platf {
     // If we have active slots, cancel them all
     if (raw->activeTouchSlots > 0) {
       for (UINT32 i = 0; i < raw->activeTouchSlots; i++) {
-        populate_common_pointer_info(raw->touchInfo[i].touchInfo.pointerInfo, {}, LI_TOUCH_EVENT_CANCEL_ALL, 0.0f, 0.0f);
+        populate_common_pointer_info(raw->touchInfo[i].touchInfo.pointerInfo, {}, LI_TOUCH_EVENT_CANCEL_ALL, 0.0f, 0.0f, true);
         raw->touchInfo[i].touchInfo.pointerInfo.pointerFlags = win_input::apply_touch_pointer_event_flags(
           raw->touchInfo[i].touchInfo.pointerInfo.pointerFlags,
           LI_TOUCH_EVENT_CANCEL_ALL,
