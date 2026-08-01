@@ -5,6 +5,7 @@
 #pragma once
 
 // standard includes
+#include <cstdint>
 #include <optional>
 #include <span>
 
@@ -44,4 +45,30 @@ namespace platf::win_input {
     bool send_to_primary_display,
     const std::optional<touch_port_t> &primary_touch_port
   );
+
+  /**
+   * @brief Add Windows compatibility flags for a native touch event.
+   *
+   * @param pointer_flags Existing Windows pointer flags after applying the event state transition.
+   * @param event_type Moonlight touch event type.
+   * @param designate_primary Whether this contact starts a new primary touch interaction.
+   * @return Pointer flags to inject for the event.
+   */
+  std::uint32_t apply_touch_pointer_event_flags(std::uint32_t pointer_flags, std::uint8_t event_type, bool designate_primary);
+
+  /**
+   * @brief Remove transient Windows touch flags after a frame is injected.
+   *
+   * @param pointer_flags Pointer flags used for the injected frame.
+   * @return Persistent flags to retain for subsequent touch frames.
+   */
+  std::uint32_t finish_touch_pointer_frame(std::uint32_t pointer_flags);
+
+  /**
+   * @brief Determine whether a touch pointer prevents a new primary contact from being designated.
+   *
+   * @param pointer_flags Current Windows pointer flags for a touch pointer.
+   * @return `true` when the pointer belongs to the current contact interaction.
+   */
+  bool touch_pointer_blocks_primary_designation(std::uint32_t pointer_flags);
 }  // namespace platf::win_input

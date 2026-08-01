@@ -6,6 +6,9 @@
 
 #ifdef _WIN32
 
+  // platform includes
+  #include <Windows.h>
+
   // standard includes
   #include <array>
   #include <limits>
@@ -157,6 +160,78 @@ TEST(WindowsTouchTargetTest, UnrepresentablePrimaryDisplayOffsetIsInvalid) {
   };
 
   EXPECT_FALSE(platf::win_input::make_primary_display_touch_port(displays));
+}
+
+TEST(WindowsTouchPointerFlagsTest, FirstContactIsPrimaryAndMouseCompatible) {
+  constexpr std::uint32_t event_flags = POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_DOWN;
+
+  const auto injected_flags = platf::win_input::apply_touch_pointer_event_flags(event_flags, LI_TOUCH_EVENT_DOWN, true);
+
+  EXPECT_TRUE(injected_flags & POINTER_FLAG_PRIMARY);
+  EXPECT_TRUE(injected_flags & POINTER_FLAG_FIRSTBUTTON);
+  EXPECT_TRUE(platf::win_input::touch_pointer_blocks_primary_designation(injected_flags));
+
+  const auto persistent_flags = platf::win_input::finish_touch_pointer_frame(injected_flags);
+  EXPECT_FALSE(persistent_flags & POINTER_FLAG_DOWN);
+  EXPECT_TRUE(persistent_flags & POINTER_FLAG_PRIMARY);
+  EXPECT_TRUE(persistent_flags & POINTER_FLAG_FIRSTBUTTON);
+}
+
+TEST(WindowsTouchPointerFlagsTest, AdditionalContactIsNotPrimary) {
+  constexpr std::uint32_t event_flags = POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_DOWN;
+
+  const auto injected_flags = platf::win_input::apply_touch_pointer_event_flags(event_flags, LI_TOUCH_EVENT_DOWN, false);
+
+  EXPECT_FALSE(injected_flags & POINTER_FLAG_PRIMARY);
+  EXPECT_TRUE(injected_flags & POINTER_FLAG_FIRSTBUTTON);
+}
+
+TEST(WindowsTouchPointerFlagsTest, ContactMoveRetainsMouseCompatibility) {
+  constexpr std::uint32_t event_flags = POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_UPDATE | POINTER_FLAG_PRIMARY;
+
+  const auto injected_flags = platf::win_input::apply_touch_pointer_event_flags(event_flags, LI_TOUCH_EVENT_MOVE, false);
+  const auto persistent_flags = platf::win_input::finish_touch_pointer_frame(injected_flags);
+
+  EXPECT_FALSE(persistent_flags & POINTER_FLAG_UPDATE);
+  EXPECT_TRUE(persistent_flags & POINTER_FLAG_PRIMARY);
+  EXPECT_TRUE(persistent_flags & POINTER_FLAG_FIRSTBUTTON);
+}
+
+TEST(WindowsTouchPointerFlagsTest, PrimaryReleaseIsInjectedBeforeDesignationIsCleared) {
+  constexpr std::uint32_t event_flags = POINTER_FLAG_UP | POINTER_FLAG_FIRSTBUTTON | POINTER_FLAG_PRIMARY;
+
+  const auto injected_flags = platf::win_input::apply_touch_pointer_event_flags(event_flags, LI_TOUCH_EVENT_UP, false);
+
+  EXPECT_TRUE(injected_flags & POINTER_FLAG_UP);
+  EXPECT_TRUE(injected_flags & POINTER_FLAG_PRIMARY);
+  EXPECT_FALSE(injected_flags & POINTER_FLAG_FIRSTBUTTON);
+  EXPECT_TRUE(platf::win_input::touch_pointer_blocks_primary_designation(injected_flags));
+
+  const auto persistent_flags = platf::win_input::finish_touch_pointer_frame(injected_flags);
+  EXPECT_EQ(persistent_flags, POINTER_FLAG_NONE);
+  EXPECT_FALSE(platf::win_input::touch_pointer_blocks_primary_designation(persistent_flags));
+}
+
+TEST(WindowsTouchPointerFlagsTest, NonContactEventsClearMouseButtonCompatibility) {
+  constexpr std::array<std::uint8_t, 4> event_types {
+    LI_TOUCH_EVENT_HOVER,
+    LI_TOUCH_EVENT_CANCEL,
+    LI_TOUCH_EVENT_CANCEL_ALL,
+    LI_TOUCH_EVENT_HOVER_LEAVE
+  };
+
+  for (const auto event_type : event_types) {
+    constexpr std::uint32_t event_flags = POINTER_FLAG_UPDATE | POINTER_FLAG_FIRSTBUTTON;
+    const auto injected_flags = platf::win_input::apply_touch_pointer_event_flags(event_flags, event_type, false);
+    EXPECT_FALSE(injected_flags & POINTER_FLAG_FIRSTBUTTON);
+  }
+}
+
+TEST(WindowsTouchPointerFlagsTest, UnrelatedEventDoesNotChangeCompatibilityFlags) {
+  constexpr std::uint32_t event_flags = POINTER_FLAG_INRANGE;
+
+  EXPECT_EQ(platf::win_input::apply_touch_pointer_event_flags(event_flags, LI_TOUCH_EVENT_BUTTON_ONLY, true), event_flags);
+  EXPECT_EQ(platf::win_input::apply_touch_pointer_event_flags(event_flags, std::numeric_limits<std::uint8_t>::max(), true), event_flags);
 }
 
 #endif  // _WIN32
