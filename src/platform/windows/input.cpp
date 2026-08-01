@@ -17,6 +17,7 @@
 #include <Windows.h>
 
 // standard includes
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -108,6 +109,27 @@ namespace platf {
     }
 
     return *primary_touch_port;
+  }
+
+  std::pair<int, int> win_input::map_normalized_touch_position(const touch_port_t &touch_port, float normalized_x, float normalized_y) {
+    const auto map_axis = [](float normalized_coordinate, int offset, int extent) {
+      if (extent <= 0) {
+        return offset;
+      }
+
+      if (!std::isfinite(normalized_coordinate)) {
+        normalized_coordinate = 0.0f;
+      }
+
+      normalized_coordinate = std::clamp(normalized_coordinate, 0.0f, 1.0f);
+      const auto pixel_offset = std::min(static_cast<int>(normalized_coordinate * extent), extent - 1);
+      return offset + pixel_offset;
+    };
+
+    return std::pair {
+      map_axis(normalized_x, touch_port.offset_x, touch_port.width),
+      map_axis(normalized_y, touch_port.offset_y, touch_port.height)
+    };
   }
 
   std::uint32_t win_input::apply_touch_pointer_event_flags(std::uint32_t pointer_flags, std::uint8_t event_type, bool designate_primary) {
@@ -997,19 +1019,29 @@ namespace platf {
    * @param eventType The type of touch/pen event.
    * @param x The normalized 0.0-1.0 X coordinate.
    * @param y The normalized 0.0-1.0 Y coordinate.
+   * @param constrain_to_touch_port Whether to keep updated pixel locations inside the touch port.
    */
-  void populate_common_pointer_info(POINTER_INFO &pointerInfo, const touch_port_t &touchPort, uint8_t eventType, float x, float y) {
+  void populate_common_pointer_info(POINTER_INFO &pointerInfo, const touch_port_t &touchPort, uint8_t eventType, float x, float y, bool constrain_to_touch_port) {
+    const auto update_pointer_location = [&]() {
+      if (constrain_to_touch_port) {
+        const auto [pixel_x, pixel_y] = win_input::map_normalized_touch_position(touchPort, x, y);
+        pointerInfo.ptPixelLocation.x = pixel_x;
+        pointerInfo.ptPixelLocation.y = pixel_y;
+      } else {
+        pointerInfo.ptPixelLocation.x = x * touchPort.width + touchPort.offset_x;
+        pointerInfo.ptPixelLocation.y = y * touchPort.height + touchPort.offset_y;
+      }
+    };
+
     switch (eventType) {
       case LI_TOUCH_EVENT_HOVER:
         pointerInfo.pointerFlags &= ~POINTER_FLAG_INCONTACT;
         pointerInfo.pointerFlags |= POINTER_FLAG_INRANGE | POINTER_FLAG_UPDATE;
-        pointerInfo.ptPixelLocation.x = x * touchPort.width + touchPort.offset_x;
-        pointerInfo.ptPixelLocation.y = y * touchPort.height + touchPort.offset_y;
+        update_pointer_location();
         break;
       case LI_TOUCH_EVENT_DOWN:
         pointerInfo.pointerFlags |= POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_DOWN;
-        pointerInfo.ptPixelLocation.x = x * touchPort.width + touchPort.offset_x;
-        pointerInfo.ptPixelLocation.y = y * touchPort.height + touchPort.offset_y;
+        update_pointer_location();
         break;
       case LI_TOUCH_EVENT_UP:
         // We expect to get another LI_TOUCH_EVENT_HOVER if the pointer remains in range
@@ -1018,8 +1050,7 @@ namespace platf {
         break;
       case LI_TOUCH_EVENT_MOVE:
         pointerInfo.pointerFlags |= POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_UPDATE;
-        pointerInfo.ptPixelLocation.x = x * touchPort.width + touchPort.offset_x;
-        pointerInfo.ptPixelLocation.y = y * touchPort.height + touchPort.offset_y;
+        update_pointer_location();
         break;
       case LI_TOUCH_EVENT_CANCEL:
       case LI_TOUCH_EVENT_CANCEL_ALL:
@@ -1205,7 +1236,7 @@ namespace platf {
     touchInfo.pointerInfo.pointerType = PT_TOUCH;
 
     // Populate shared pointer info fields
-    populate_common_pointer_info(touchInfo.pointerInfo, selected_touch_port, touch.eventType, touch.x, touch.y);
+    populate_common_pointer_info(touchInfo.pointerInfo, selected_touch_port, touch.eventType, touch.x, touch.y, true);
     touchInfo.pointerInfo.pointerFlags = win_input::apply_touch_pointer_event_flags(
       touchInfo.pointerInfo.pointerFlags,
       touch.eventType,
@@ -1321,7 +1352,7 @@ namespace platf {
     penInfo.pointerInfo.pointerId = 0;
 
     // Populate shared pointer info fields
-    populate_common_pointer_info(penInfo.pointerInfo, touch_port, pen.eventType, pen.x, pen.y);
+    populate_common_pointer_info(penInfo.pointerInfo, touch_port, pen.eventType, pen.x, pen.y, false);
 
     // Windows only supports a single pen button, so send all buttons as the barrel button
     if (pen.penButtons) {

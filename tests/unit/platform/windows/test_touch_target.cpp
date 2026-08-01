@@ -80,9 +80,48 @@ TEST(WindowsTouchTargetTest, DifferentResolutionPreservesRelativePosition) {
   const auto primary_touch_port = platf::win_input::make_primary_display_touch_port(displays);
 
   const auto selected_touch_port = platf::win_input::select_touch_port(streamed_touch_port, true, primary_touch_port);
+  const auto [pixel_x, pixel_y] = platf::win_input::map_normalized_touch_position(selected_touch_port, normalized_x, normalized_y);
 
-  EXPECT_FLOAT_EQ(selected_touch_port.offset_x + normalized_x * selected_touch_port.width, 1920.0f);
-  EXPECT_FLOAT_EQ(selected_touch_port.offset_y + normalized_y * selected_touch_port.height, 1080.0f);
+  EXPECT_EQ(pixel_x, 1920);
+  EXPECT_EQ(pixel_y, 1080);
+}
+
+TEST(WindowsTouchTargetTest, BlackBarTouchStaysInsideSelectedDisplay) {
+  constexpr platf::touch_port_t selected_touch_port {2560, 1440, 1920, 1080, 0, 0};
+
+  const auto [left, top] = platf::win_input::map_normalized_touch_position(selected_touch_port, -0.25f, -0.25f);
+  const auto [right, bottom] = platf::win_input::map_normalized_touch_position(selected_touch_port, 1.25f, 1.25f);
+
+  EXPECT_EQ(left, 2560);
+  EXPECT_EQ(top, 1440);
+  EXPECT_EQ(right, 4479);
+  EXPECT_EQ(bottom, 2519);
+}
+
+TEST(WindowsTouchTargetTest, ExactVideoEdgeDoesNotReachAdjacentDesktop) {
+  constexpr platf::touch_port_t selected_touch_port {0, 0, 3840, 2160, 0, 0};
+
+  const auto [right, bottom] = platf::win_input::map_normalized_touch_position(selected_touch_port, 1.0f, 1.0f);
+
+  EXPECT_EQ(right, 3839);
+  EXPECT_EQ(bottom, 2159);
+}
+
+TEST(WindowsTouchTargetTest, InvalidExtentAndNonFiniteCoordinatesStayAtDisplayOrigin) {
+  constexpr platf::touch_port_t invalid_touch_port {640, 360, 0, -1, 0, 0};
+  constexpr platf::touch_port_t valid_touch_port {640, 360, 1280, 768, 0, 0};
+
+  const auto [invalid_x, invalid_y] = platf::win_input::map_normalized_touch_position(invalid_touch_port, 0.5f, 0.5f);
+  const auto [non_finite_x, non_finite_y] = platf::win_input::map_normalized_touch_position(
+    valid_touch_port,
+    std::numeric_limits<float>::quiet_NaN(),
+    std::numeric_limits<float>::infinity()
+  );
+
+  EXPECT_EQ(invalid_x, 640);
+  EXPECT_EQ(invalid_y, 360);
+  EXPECT_EQ(non_finite_x, 640);
+  EXPECT_EQ(non_finite_y, 360);
 }
 
 TEST(WindowsTouchTargetTest, PrimarySelectionDoesNotMutateStreamedPortUsedByPenAndMouse) {

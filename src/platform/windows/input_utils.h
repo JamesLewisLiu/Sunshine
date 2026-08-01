@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 
 // local includes
 #include "src/platform/common.h"
@@ -45,6 +46,16 @@ namespace platf::win_input {
     bool send_to_primary_display,
     const std::optional<touch_port_t> &primary_touch_port
   );
+
+  /**
+   * @brief Map normalized native-touch coordinates to a pixel inside a Windows display.
+   *
+   * @param touch_port Physical bounds of the selected touch target.
+   * @param normalized_x Horizontal coordinate in normalized video coordinates.
+   * @param normalized_y Vertical coordinate in normalized video coordinates.
+   * @return Pixel coordinates clamped to the selected display's inclusive bounds.
+   */
+  std::pair<int, int> map_normalized_touch_position(const touch_port_t &touch_port, float normalized_x, float normalized_y);
 
   /**
    * @brief Add Windows compatibility flags for a native touch event.
