@@ -1086,13 +1086,6 @@ namespace input {
     input->gamepads[packet->controllerNumber].id = id;
   }
 
-  /**
-   * @brief Normalizes coordinates to monitor-local logical touch dimensions.
-   * @param touch_port The current touch port metadata.
-   * @param coords The in/out coordinate pair to normalize.
-   * @param use_effective_content Whether to exclude encoded letterbox or pillarbox regions from normalization.
-   * @return The monitor-local touch port, or std::nullopt if dimensions are invalid.
-   */
   std::optional<platf::touch_port_t> monitor_touch_port(const input::touch_port_t &touch_port, std::pair<float, float> &coords, bool use_effective_content) {
     const float frame_logical_w = (touch_port.width * touch_port.scalar_inv) / touch_port.scalar_tpcoords;
     const float frame_logical_h = (touch_port.height * touch_port.scalar_inv) / touch_port.scalar_tpcoords;
