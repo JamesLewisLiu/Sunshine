@@ -5,7 +5,7 @@ permissions: {}
 on:
   push:
     branches:
-      - touch-send-to-mainscreen-only
+      - touch-send-to-mainscreen-only-poc
   workflow_dispatch:
 
 concurrency:
