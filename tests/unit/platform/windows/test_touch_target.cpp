@@ -86,6 +86,22 @@ TEST(WindowsTouchTargetTest, DifferentResolutionPreservesRelativePosition) {
   EXPECT_EQ(pixel_y, 1080);
 }
 
+TEST(WindowsTouchTargetTest, FullHdPrimaryDisplayUsesEntirePixelRange) {
+  constexpr platf::touch_port_t selected_touch_port {0, 0, 1920, 1080, 0, 0};
+
+  const auto [left, top] = platf::win_input::map_normalized_touch_position(selected_touch_port, 0.0f, 0.0f);
+  const auto [center_x, center_y] =
+    platf::win_input::map_normalized_touch_position(selected_touch_port, 0.5f, 0.5f);
+  const auto [right, bottom] = platf::win_input::map_normalized_touch_position(selected_touch_port, 1.0f, 1.0f);
+
+  EXPECT_EQ(left, 0);
+  EXPECT_EQ(top, 0);
+  EXPECT_EQ(center_x, 960);
+  EXPECT_EQ(center_y, 540);
+  EXPECT_EQ(right, 1919);
+  EXPECT_EQ(bottom, 1079);
+}
+
 TEST(WindowsTouchTargetTest, BlackBarTouchStaysInsideSelectedDisplay) {
   constexpr platf::touch_port_t selected_touch_port {2560, 1440, 1920, 1080, 0, 0};
 

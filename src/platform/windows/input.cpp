@@ -39,6 +39,77 @@
 namespace platf {
   using namespace std::literals;
 
+  namespace {
+    /**
+     * @brief Temporarily apply a per-monitor-aware DPI context to the current thread.
+     * @details Windows can virtualize coordinates for DPI-unaware threads. Native touch targeting uses physical
+     * display pixels, so the primary-display path temporarily opts the calling thread into Per-Monitor V2 and
+     * restores its previous context when the scope ends.
+     */
+    class scoped_per_monitor_dpi_awareness_t {
+    public:
+      /**
+       * @brief Apply Per-Monitor V2 awareness when requested.
+       *
+       * @param enabled Whether to change the current thread's DPI awareness context.
+       */
+      explicit scoped_per_monitor_dpi_awareness_t(bool enabled) {
+        if (enabled) {
+          previous_context_ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+          if (!previous_context_) {
+            error_ = GetLastError();
+          }
+        }
+      }
+
+      /**
+       * @brief Restore the DPI awareness context that was active before construction.
+       */
+      ~scoped_per_monitor_dpi_awareness_t() {
+        if (previous_context_) {
+          SetThreadDpiAwarenessContext(previous_context_);
+        }
+      }
+
+      /**
+       * @brief Copy construction is disabled because each guard owns one context restoration.
+       *
+       * @param other Guard that would otherwise be copied.
+       */
+      scoped_per_monitor_dpi_awareness_t(const scoped_per_monitor_dpi_awareness_t &other) = delete;
+
+      /**
+       * @brief Copy assignment is disabled because each guard owns one context restoration.
+       *
+       * @param other Guard that would otherwise be assigned.
+       * @return Assignment is disabled.
+       */
+      scoped_per_monitor_dpi_awareness_t &operator=(const scoped_per_monitor_dpi_awareness_t &other) = delete;
+
+      /**
+       * @brief Check whether the requested DPI context was applied.
+       *
+       * @return `true` when the thread context was changed successfully.
+       */
+      [[nodiscard]] bool active() const {
+        return previous_context_ != nullptr;
+      }
+
+      /**
+       * @brief Return the Windows error captured when applying the DPI context.
+       *
+       * @return Win32 error code, or `ERROR_SUCCESS` when no failure was recorded.
+       */
+      [[nodiscard]] DWORD error() const {
+        return error_;
+      }
+
+    private:
+      DPI_AWARENESS_CONTEXT previous_context_ {};  ///< DPI context to restore when the scope ends.
+      DWORD error_ {ERROR_SUCCESS};  ///< Error reported while applying Per-Monitor V2 awareness.
+    };
+  }  // namespace
+
   thread_local HDESK _lastKnownInputDesktop = nullptr;  ///< Last known input desktop.
 
   /**
@@ -944,6 +1015,7 @@ namespace platf {
     UINT32 activeTouchSlots {};  ///< Active touch slots.
     thread_pool_util::ThreadPool::task_id_t touchRepeatTask {};  ///< Touch repeat task.
     bool primaryTouchPortWarningLogged {};  ///< Whether invalid primary-display metrics have already been logged.
+    bool primaryTouchDpiWarningLogged {};  ///< Whether a failure to apply physical touch coordinates was logged.
   };
 
   /**
@@ -1084,6 +1156,10 @@ namespace platf {
    * @param raw The raw client-specific input context.
    */
   void repeat_touch(client_input_raw_t *raw) {
+    const scoped_per_monitor_dpi_awareness_t dpi_context {
+      config::input.touch_send_to_primary_display
+    };
+
     if (!inject_synthetic_pointer_input(raw->global, raw->touch, raw->touchInfo, raw->activeTouchSlots)) {
       auto err = GetLastError();
       BOOST_LOG(warning) << "Failed to refresh virtual touch input: "sv << err;
@@ -1110,6 +1186,10 @@ namespace platf {
    * @param raw The raw client-specific input context.
    */
   void cancel_all_active_touches(client_input_raw_t *raw) {
+    const scoped_per_monitor_dpi_awareness_t dpi_context {
+      config::input.touch_send_to_primary_display
+    };
+
     // Cancel touch repeat callbacks
     if (raw->touchRepeatTask) {
       task_pool.cancel(raw->touchRepeatTask);
@@ -1149,6 +1229,8 @@ namespace platf {
    */
   void touch_update(client_input_t *input, const touch_port_t &touch_port, const touch_input_t &touch) {
     auto raw = (client_input_raw_t *) input;
+    const bool send_to_primary_display = config::input.touch_send_to_primary_display;
+    const scoped_per_monitor_dpi_awareness_t dpi_context {send_to_primary_display};
 
     // Bail if we're not running on an OS that supports virtual touch input
     if (!raw->global->fnCreateSyntheticPointerDevice || !raw->global->fnInjectSyntheticPointerInput || !raw->global->fnDestroySyntheticPointerDevice) {
@@ -1184,10 +1266,18 @@ namespace platf {
       return;
     }
 
-    const bool send_to_primary_display = config::input.touch_send_to_primary_display;
     std::optional<touch_port_t> primary_touch_port;
     if (send_to_primary_display) {
       primary_touch_port = query_primary_display_touch_port();
+
+      if (!dpi_context.active() && !raw->primaryTouchDpiWarningLogged) {
+        BOOST_LOG(warning)
+          << "Unable to apply Per-Monitor V2 DPI awareness for primary-display touch input ["sv
+          << dpi_context.error() << "]; touch coordinates may be DPI-virtualized"sv;
+        raw->primaryTouchDpiWarningLogged = true;
+      } else if (dpi_context.active()) {
+        raw->primaryTouchDpiWarningLogged = false;
+      }
 
       if (!primary_touch_port && !raw->primaryTouchPortWarningLogged) {
         BOOST_LOG(warning) << "Unable to target the primary display for touch input due to an invalid physical display topology; using the streamed display instead"sv;
@@ -1197,6 +1287,7 @@ namespace platf {
       }
     } else {
       raw->primaryTouchPortWarningLogged = false;
+      raw->primaryTouchDpiWarningLogged = false;
     }
 
     // Keep this selection local to native touch injection so pen and mouse input
@@ -1206,6 +1297,16 @@ namespace platf {
       send_to_primary_display,
       primary_touch_port
     );
+
+    if (send_to_primary_display && primary_touch_port && touch.eventType == LI_TOUCH_EVENT_DOWN) {
+      BOOST_LOG(debug)
+        << "Primary-display touch target: offset "sv
+        << selected_touch_port.offset_x << 'x' << selected_touch_port.offset_y
+        << ", size "sv << selected_touch_port.width << 'x' << selected_touch_port.height
+        << ", virtual desktop "sv
+        << GetSystemMetrics(SM_CXVIRTUALSCREEN) << 'x' << GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        << ", Per-Monitor V2 DPI context "sv << (dpi_context.active() ? "active"sv : "unavailable"sv);
+    }
 
     bool designate_primary_touch = touch.eventType == LI_TOUCH_EVENT_DOWN;
     if (designate_primary_touch) {
