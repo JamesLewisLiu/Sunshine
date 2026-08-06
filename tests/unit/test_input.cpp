@@ -32,21 +32,46 @@ TEST(InputTouchDensifierTest, Stable120HzMovementProducesOne240HzPrediction) {
   input::touch_densifier_t densifier;
   const auto start = input::touch_densifier_t::clock_t::time_point {};
 
-  EXPECT_FALSE(densifier.observe(make_touch(LI_TOUCH_EVENT_DOWN, 1, 0.0f, 0.0f), start, 240).prediction);
-  EXPECT_FALSE(densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.08f, 0.0f), start + std::chrono::microseconds {8333}, 240).prediction);
+  EXPECT_TRUE(densifier.observe(make_touch(LI_TOUCH_EVENT_DOWN, 1, 0.0f, 0.0f), start, 240).predictions.empty());
+  EXPECT_TRUE(densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.08f, 0.0f), start + std::chrono::microseconds {8333}, 240).predictions.empty());
   const auto observation = densifier.observe(
     make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.16f, 0.0f),
     start + std::chrono::microseconds {16666},
     240
   );
 
-  ASSERT_TRUE(observation.prediction);
-  EXPECT_NEAR(observation.prediction->touch.x, 0.20f, 0.001f);
-  EXPECT_FLOAT_EQ(observation.prediction->touch.y, 0.0f);
-  EXPECT_EQ(observation.prediction->touch.pressure_or_distance, 0.5f);
-  EXPECT_NEAR(std::chrono::duration<double, std::milli>(observation.prediction->delay).count(), 4.1667, 0.001);
-  EXPECT_TRUE(densifier.consume(1, observation.prediction->generation));
-  EXPECT_FALSE(densifier.consume(1, observation.prediction->generation));
+  ASSERT_EQ(observation.predictions.size(), 1);
+  const auto &prediction = observation.predictions.front();
+  EXPECT_NEAR(prediction.touch.x, 0.20f, 0.001f);
+  EXPECT_FLOAT_EQ(prediction.touch.y, 0.0f);
+  EXPECT_EQ(prediction.touch.pressure_or_distance, 0.5f);
+  EXPECT_NEAR(std::chrono::duration<double, std::milli>(prediction.delay).count(), 4.1667, 0.001);
+  EXPECT_TRUE(densifier.consume(1, prediction.generation));
+  EXPECT_FALSE(densifier.consume(1, prediction.generation));
+}
+
+TEST(InputTouchDensifierTest, Stable120HzMovementProducesThree480HzPredictions) {
+  input::touch_densifier_t densifier;
+  const auto start = input::touch_densifier_t::clock_t::time_point {};
+
+  densifier.observe(make_touch(LI_TOUCH_EVENT_DOWN, 1, 0.0f, 0.0f), start, 480);
+  densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.04f, 0.0f), start + std::chrono::microseconds {8333}, 480);
+  const auto observation = densifier.observe(
+    make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.08f, 0.0f),
+    start + std::chrono::microseconds {16666},
+    480
+  );
+
+  ASSERT_EQ(observation.predictions.size(), 3);
+  EXPECT_NEAR(observation.predictions[0].touch.x, 0.09f, 0.001f);
+  EXPECT_NEAR(observation.predictions[1].touch.x, 0.10f, 0.001f);
+  EXPECT_NEAR(observation.predictions[2].touch.x, 0.11f, 0.001f);
+  EXPECT_NEAR(std::chrono::duration<double, std::milli>(observation.predictions[0].delay).count(), 2.0833, 0.001);
+  EXPECT_NEAR(std::chrono::duration<double, std::milli>(observation.predictions[1].delay).count(), 4.1667, 0.001);
+  EXPECT_NEAR(std::chrono::duration<double, std::milli>(observation.predictions[2].delay).count(), 6.25, 0.001);
+  for (const auto &prediction : observation.predictions) {
+    EXPECT_TRUE(densifier.consume(1, prediction.generation));
+  }
 }
 
 TEST(InputTouchDensifierTest, DisabledModeNeverPredicts) {
@@ -61,7 +86,7 @@ TEST(InputTouchDensifierTest, DisabledModeNeverPredicts) {
     0
   );
 
-  EXPECT_FALSE(observation.prediction);
+  EXPECT_TRUE(observation.predictions.empty());
 }
 
 TEST(InputTouchDensifierTest, ArrivalJitterFallsBackToRealSamples) {
@@ -76,7 +101,7 @@ TEST(InputTouchDensifierTest, ArrivalJitterFallsBackToRealSamples) {
     240
   );
 
-  EXPECT_FALSE(observation.prediction);
+  EXPECT_TRUE(observation.predictions.empty());
 }
 
 TEST(InputTouchDensifierTest, Native240HzInputIsNotDensified) {
@@ -91,10 +116,10 @@ TEST(InputTouchDensifierTest, Native240HzInputIsNotDensified) {
     240
   );
 
-  EXPECT_FALSE(observation.prediction);
+  EXPECT_TRUE(observation.predictions.empty());
 }
 
-TEST(InputTouchDensifierTest, Stable100HzInputIsOutsideThe120To240Experiment) {
+TEST(InputTouchDensifierTest, Stable100HzInputIsOutsideThe120HzExperiment) {
   input::touch_densifier_t densifier;
   const auto start = input::touch_densifier_t::clock_t::time_point {};
 
@@ -106,7 +131,7 @@ TEST(InputTouchDensifierTest, Stable100HzInputIsOutsideThe120To240Experiment) {
     240
   );
 
-  EXPECT_FALSE(observation.prediction);
+  EXPECT_TRUE(observation.predictions.empty());
 }
 
 TEST(InputTouchDensifierTest, UpImmediatelyInvalidatesPendingPrediction) {
@@ -115,13 +140,13 @@ TEST(InputTouchDensifierTest, UpImmediatelyInvalidatesPendingPrediction) {
 
   densifier.observe(make_touch(LI_TOUCH_EVENT_DOWN, 7, 0.0f, 0.0f), start, 240);
   densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 7, 0.08f, 0.0f), start + std::chrono::microseconds {8333}, 240);
-  const auto prediction = densifier.observe(
-                                     make_touch(LI_TOUCH_EVENT_MOVE, 7, 0.16f, 0.0f),
-                                     start + std::chrono::microseconds {16666},
-                                     240
+  const auto predictions = densifier.observe(
+                                      make_touch(LI_TOUCH_EVENT_MOVE, 7, 0.16f, 0.0f),
+                                      start + std::chrono::microseconds {16666},
+                                      240
   )
-                            .prediction;
-  ASSERT_TRUE(prediction);
+                             .predictions;
+  ASSERT_EQ(predictions.size(), 1);
 
   const auto up = densifier.observe(
     make_touch(LI_TOUCH_EVENT_UP, 7, 0.16f, 0.0f),
@@ -131,32 +156,36 @@ TEST(InputTouchDensifierTest, UpImmediatelyInvalidatesPendingPrediction) {
 
   ASSERT_EQ(up.cancel_pointer_ids.size(), 1);
   EXPECT_EQ(up.cancel_pointer_ids.front(), 7);
-  EXPECT_FALSE(densifier.consume(7, prediction->generation));
+  EXPECT_FALSE(densifier.consume(7, predictions.front().generation));
 }
 
-TEST(InputTouchDensifierTest, NewRealMoveInvalidatesAndReplacesPendingPrediction) {
+TEST(InputTouchDensifierTest, NewRealMoveInvalidatesAndReplacesPending480HzBatch) {
   input::touch_densifier_t densifier;
   const auto start = input::touch_densifier_t::clock_t::time_point {};
 
-  densifier.observe(make_touch(LI_TOUCH_EVENT_DOWN, 1, 0.0f, 0.0f), start, 240);
-  densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.08f, 0.0f), start + std::chrono::microseconds {8333}, 240);
+  densifier.observe(make_touch(LI_TOUCH_EVENT_DOWN, 1, 0.0f, 0.0f), start, 480);
+  densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.04f, 0.0f), start + std::chrono::microseconds {8333}, 480);
   const auto first = densifier.observe(
-    make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.16f, 0.0f),
+    make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.08f, 0.0f),
     start + std::chrono::microseconds {16666},
-    240
+    480
   );
-  ASSERT_TRUE(first.prediction);
+  ASSERT_EQ(first.predictions.size(), 3);
 
   const auto correction = densifier.observe(
-    make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.24f, 0.0f),
+    make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.12f, 0.0f),
     start + std::chrono::microseconds {24999},
-    240
+    480
   );
 
   EXPECT_EQ(correction.cancel_pointer_ids, std::vector<std::uint32_t> {1});
-  ASSERT_TRUE(correction.prediction);
-  EXPECT_FALSE(densifier.consume(1, first.prediction->generation));
-  EXPECT_TRUE(densifier.consume(1, correction.prediction->generation));
+  ASSERT_EQ(correction.predictions.size(), 3);
+  for (const auto &prediction : first.predictions) {
+    EXPECT_FALSE(densifier.consume(1, prediction.generation));
+  }
+  for (const auto &prediction : correction.predictions) {
+    EXPECT_TRUE(densifier.consume(1, prediction.generation));
+  }
 }
 
 TEST(InputTouchDensifierTest, CancelAllClearsPendingPredictionAndHistory) {
@@ -165,13 +194,13 @@ TEST(InputTouchDensifierTest, CancelAllClearsPendingPredictionAndHistory) {
 
   densifier.observe(make_touch(LI_TOUCH_EVENT_DOWN, 1, 0.0f, 0.0f), start, 240);
   densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.08f, 0.0f), start + std::chrono::microseconds {8333}, 240);
-  const auto prediction = densifier.observe(
-                                     make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.16f, 0.0f),
-                                     start + std::chrono::microseconds {16666},
-                                     240
+  const auto predictions = densifier.observe(
+                                      make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.16f, 0.0f),
+                                      start + std::chrono::microseconds {16666},
+                                      240
   )
-                            .prediction;
-  ASSERT_TRUE(prediction);
+                             .predictions;
+  ASSERT_EQ(predictions.size(), 1);
 
   const auto cancel_all = densifier.observe(
     make_touch(LI_TOUCH_EVENT_CANCEL_ALL, 0, 0.0f, 0.0f),
@@ -180,8 +209,8 @@ TEST(InputTouchDensifierTest, CancelAllClearsPendingPredictionAndHistory) {
   );
 
   EXPECT_EQ(cancel_all.cancel_pointer_ids, std::vector<std::uint32_t> {1});
-  EXPECT_FALSE(densifier.consume(1, prediction->generation));
-  EXPECT_FALSE(densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.24f, 0.0f), start + std::chrono::microseconds {25000}, 240).prediction);
+  EXPECT_FALSE(densifier.consume(1, predictions.front().generation));
+  EXPECT_TRUE(densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.24f, 0.0f), start + std::chrono::microseconds {25000}, 240).predictions.empty());
 }
 
 TEST(InputTouchDensifierTest, MultiTouchCancelsAndSuppressesPrediction) {
@@ -190,13 +219,13 @@ TEST(InputTouchDensifierTest, MultiTouchCancelsAndSuppressesPrediction) {
 
   densifier.observe(make_touch(LI_TOUCH_EVENT_DOWN, 1, 0.0f, 0.0f), start, 240);
   densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.08f, 0.0f), start + std::chrono::microseconds {8333}, 240);
-  const auto first_prediction = densifier.observe(
-                                           make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.16f, 0.0f),
-                                           start + std::chrono::microseconds {16666},
-                                           240
+  const auto first_predictions = densifier.observe(
+                                            make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.16f, 0.0f),
+                                            start + std::chrono::microseconds {16666},
+                                            240
   )
-                                  .prediction;
-  ASSERT_TRUE(first_prediction);
+                                   .predictions;
+  ASSERT_EQ(first_predictions.size(), 1);
 
   const auto second_down = densifier.observe(
     make_touch(LI_TOUCH_EVENT_DOWN, 2, 0.5f, 0.5f),
@@ -204,7 +233,7 @@ TEST(InputTouchDensifierTest, MultiTouchCancelsAndSuppressesPrediction) {
     240
   );
   EXPECT_EQ(second_down.cancel_pointer_ids, std::vector<std::uint32_t> {1});
-  EXPECT_FALSE(densifier.consume(1, first_prediction->generation));
+  EXPECT_FALSE(densifier.consume(1, first_predictions.front().generation));
 
   densifier.observe(make_touch(LI_TOUCH_EVENT_MOVE, 1, 0.3f, 0.0f), start + std::chrono::microseconds {25000}, 240);
   const auto multi_touch_move = densifier.observe(
@@ -212,7 +241,7 @@ TEST(InputTouchDensifierTest, MultiTouchCancelsAndSuppressesPrediction) {
     start + std::chrono::microseconds {33333},
     240
   );
-  EXPECT_FALSE(multi_touch_move.prediction);
+  EXPECT_TRUE(multi_touch_move.predictions.empty());
 }
 
 TEST(InputTouchDensifierTest, ExcessivePredictionDistanceFallsBackToRealSample) {
@@ -227,7 +256,7 @@ TEST(InputTouchDensifierTest, ExcessivePredictionDistanceFallsBackToRealSample) 
     240
   );
 
-  EXPECT_FALSE(observation.prediction);
+  EXPECT_TRUE(observation.predictions.empty());
 }
 
 TEST(InputTouchPortTest, EncodedPillarboxUsesStreamedDisplayResolution) {

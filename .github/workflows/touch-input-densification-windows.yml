@@ -1,0 +1,25 @@
+---
+name: Touch Input Densification Windows CI
+permissions: {}
+
+on:
+  push:
+    branches:
+      - touch-input-densification-poc
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Windows 240/480 Hz touch densification
+    if: github.ref_name == 'touch-input-densification-poc'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-windows.yml
+    with:
+      publish_release: 'false'
+      release_commit: ${{ github.sha }}
+      release_version: '0.0.0'

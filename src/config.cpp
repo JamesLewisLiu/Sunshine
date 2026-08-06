@@ -1806,9 +1806,9 @@ namespace config {
     bool_f(vars, "high_resolution_scrolling", input.high_resolution_scrolling);
     bool_f(vars, "native_pen_touch", input.native_pen_touch);
     bool_f(vars, "touch_send_to_primary_display", input.touch_send_to_primary_display);
-    int_between_f(vars, "touch_input_densification_hz", input.touch_input_densification_hz, {0, 240});
-    if (input.touch_input_densification_hz != 0 && input.touch_input_densification_hz != 240) {
-      BOOST_LOG(warning) << "config: touch_input_densification_hz currently supports only 0 or 240; disabling touch densification"sv;
+    int_between_f(vars, "touch_input_densification_hz", input.touch_input_densification_hz, {0, 480});
+    if (input.touch_input_densification_hz != 0 && input.touch_input_densification_hz != 240 && input.touch_input_densification_hz != 480) {
+      BOOST_LOG(warning) << "config: touch_input_densification_hz currently supports only 0, 240, or 480; disabling touch densification"sv;
       input.touch_input_densification_hz = 0;
     }
 

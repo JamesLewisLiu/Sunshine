@@ -9,6 +9,7 @@ extern "C" {
 }
 
 // standard includes
+#include <algorithm>
 #include <bitset>
 #include <chrono>
 #include <cmath>
@@ -267,7 +268,7 @@ namespace input {
 
     std::mutex touch_densifier_lock;  ///< Protects touch history and delayed-task bookkeeping.
     touch_densifier_t touch_densifier;  ///< Per-stream conservative touch predictor.
-    std::unordered_map<std::uint32_t, touch_prediction_task_t> touch_prediction_tasks;  ///< Pending predictions by pointer ID.
+    std::unordered_map<std::uint32_t, std::vector<touch_prediction_task_t>> touch_prediction_tasks;  ///< Pending predictions by pointer ID.
 
     thread_pool_util::ThreadPool::task_id_t mouse_left_button_timeout;  ///< Mouse left button timeout.
 
@@ -1149,9 +1150,15 @@ namespace input {
     std::lock_guard lock(input->touch_densifier_lock);
     const bool should_inject = input->touch_densifier.consume(touch.pointerId, generation);
 
-    const auto task = input->touch_prediction_tasks.find(touch.pointerId);
-    if (task != input->touch_prediction_tasks.end() && task->second.generation == generation) {
-      input->touch_prediction_tasks.erase(task);
+    const auto pointer_tasks = input->touch_prediction_tasks.find(touch.pointerId);
+    if (pointer_tasks != input->touch_prediction_tasks.end()) {
+      auto &tasks = pointer_tasks->second;
+      std::erase_if(tasks, [generation](const auto &task) {
+        return task.generation == generation;
+      });
+      if (tasks.empty()) {
+        input->touch_prediction_tasks.erase(pointer_tasks);
+      }
     }
 
     if (should_inject) {
@@ -1170,9 +1177,11 @@ namespace input {
       std::lock_guard lock(input->touch_densifier_lock);
       static_cast<void>(input->touch_densifier.reset());
       task_ids.reserve(input->touch_prediction_tasks.size());
-      for (const auto &[pointer_id, task] : input->touch_prediction_tasks) {
+      for (const auto &[pointer_id, tasks] : input->touch_prediction_tasks) {
         static_cast<void>(pointer_id);
-        task_ids.push_back(task.task_id);
+        for (const auto &task : tasks) {
+          task_ids.push_back(task.task_id);
+        }
       }
       input->touch_prediction_tasks.clear();
     }
@@ -1251,10 +1260,12 @@ namespace input {
       std::lock_guard lock(input->touch_densifier_lock);
       observation = input->touch_densifier.observe(touch_sample, touch_densifier_t::clock_t::now(), config::input.touch_input_densification_hz);
       for (const auto pointer_id : observation.cancel_pointer_ids) {
-        const auto task = input->touch_prediction_tasks.find(pointer_id);
-        if (task != input->touch_prediction_tasks.end()) {
-          cancelled_task_ids.push_back(task->second.task_id);
-          input->touch_prediction_tasks.erase(task);
+        const auto pointer_tasks = input->touch_prediction_tasks.find(pointer_id);
+        if (pointer_tasks != input->touch_prediction_tasks.end()) {
+          for (const auto &task : pointer_tasks->second) {
+            cancelled_task_ids.push_back(task.task_id);
+          }
+          input->touch_prediction_tasks.erase(pointer_tasks);
         }
       }
 
@@ -1262,8 +1273,11 @@ namespace input {
       // with prediction validation prevents a stale task from following a correction.
       platf::touch_update(input->client_context.get(), *abs_port, touch);
 
-      if (observation.prediction) {
-        const auto prediction = *observation.prediction;
+      if (!observation.predictions.empty()) {
+        auto &pointer_tasks = input->touch_prediction_tasks[touch.pointerId];
+        pointer_tasks.reserve(observation.predictions.size());
+      }
+      for (const auto &prediction : observation.predictions) {
         const platf::touch_input_t predicted_touch {
           prediction.touch.event_type,
           prediction.touch.rotation,
@@ -1283,8 +1297,7 @@ namespace input {
           prediction.generation
         );
 
-        input->touch_prediction_tasks.insert_or_assign(
-          touch.pointerId,
+        input->touch_prediction_tasks[touch.pointerId].push_back(
           input_t::touch_prediction_task_t {delayed_task.task_id, prediction.generation}
         );
       }

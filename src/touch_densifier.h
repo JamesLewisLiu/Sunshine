@@ -1,6 +1,6 @@
 /**
  * @file src/touch_densifier.h
- * @brief Conservative touch sample densification for experimental 120 Hz to 240 Hz input.
+ * @brief Conservative touch sample densification for experimental 120 Hz to 240/480 Hz input.
  */
 #pragma once
 
@@ -8,7 +8,6 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace input {
@@ -29,7 +28,7 @@ namespace input {
   /**
    * @brief Builds conservative synthetic touch updates between real client samples.
    * @details The densifier never delays real samples. It emits at most one linear
-   * extrapolation for a stable single-touch MOVE sequence and invalidates pending
+   * extrapolation batch for a stable single-touch MOVE sequence and invalidates pending
    * predictions at every state boundary or newer real sample.
    */
   class touch_densifier_t {
@@ -50,7 +49,7 @@ namespace input {
      */
     struct observation_t {
       std::vector<std::uint32_t> cancel_pointer_ids;  ///< Pointer predictions that must be cancelled.
-      std::optional<prediction_t> prediction;  ///< New prediction, if the sample stream is stable enough.
+      std::vector<prediction_t> predictions;  ///< New predictions, if the sample stream is stable enough.
     };
 
     /**
@@ -78,12 +77,12 @@ namespace input {
     touch_densifier_t &operator=(touch_densifier_t &&) noexcept;
 
     /**
-     * @brief Observe a real touch event and optionally create one prediction.
+     * @brief Observe a real touch event and optionally create a prediction batch.
      *
      * @param touch Real touch event after coordinate normalization.
      * @param arrival Monotonic host arrival time for the event.
      * @param target_hz Requested injection frequency, or zero to disable densification.
-     * @return Cancellation requests and an optional delayed synthetic update.
+     * @return Cancellation requests and zero or more delayed synthetic updates.
      */
     observation_t observe(const touch_sample_t &touch, clock_t::time_point arrival, int target_hz);
 

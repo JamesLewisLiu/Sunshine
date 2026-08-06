@@ -290,7 +290,7 @@ namespace config {
     bool high_resolution_scrolling;  ///< Enable high-resolution mouse-wheel events.
     bool native_pen_touch;  ///< Enable native pen and touch injection.
     bool touch_send_to_primary_display {false};  ///< Map streaming-client touch input to the Windows primary display.
-    int touch_input_densification_hz {0};  ///< Experimental native-touch injection rate, or zero to disable prediction.
+    int touch_input_densification_hz {0};  ///< Experimental 240/480 Hz native-touch injection rate, or zero to disable prediction.
   };
 
   namespace flag {

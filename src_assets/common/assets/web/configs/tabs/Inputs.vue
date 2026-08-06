@@ -197,6 +197,7 @@ const config = ref(props.config)
       <select id="touch_input_densification_hz" class="form-select" v-model.number="config.touch_input_densification_hz">
         <option value="0">{{ $t('_common.disabled') }}</option>
         <option value="240">240 Hz</option>
+        <option value="480">480 Hz</option>
       </select>
       <div class="form-text">{{ $t('config.touch_input_densification_hz_desc') }}</div>
     </div>

@@ -6,6 +6,7 @@
 // standard includes
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <unordered_map>
 
 // third-party includes
@@ -18,13 +19,15 @@ extern "C" {
 
 namespace input {
   namespace {
-    constexpr int TOUCH_DENSIFICATION_HZ = 240;  ///< Supported experimental touch injection frequency.
-    constexpr double MIN_SOURCE_PERIODS = 1.75;  ///< Minimum source interval relative to the target interval.
-    constexpr double MAX_SOURCE_PERIODS = 2.25;  ///< Maximum source interval relative to the target interval.
+    constexpr int SOURCE_TOUCH_HZ = 120;  ///< Source rate accepted by the experimental densifier.
+    constexpr int MIN_TOUCH_DENSIFICATION_HZ = 240;  ///< Lowest supported experimental injection frequency.
+    constexpr int MAX_TOUCH_DENSIFICATION_HZ = 480;  ///< Highest supported experimental injection frequency.
+    constexpr double MIN_SOURCE_PERIOD_RATIO = 0.875;  ///< Minimum accepted source interval relative to ideal 120 Hz.
+    constexpr double MAX_SOURCE_PERIOD_RATIO = 1.125;  ///< Maximum accepted source interval relative to ideal 120 Hz.
     constexpr double MIN_INTERVAL_RATIO = 0.75;  ///< Minimum stable interval ratio relative to the previous sample.
     constexpr double MAX_INTERVAL_RATIO = 1.25;  ///< Maximum stable interval ratio relative to the previous sample.
-    constexpr auto MAX_PREDICTION_DELAY = std::chrono::milliseconds {5};  ///< Maximum time horizon for one prediction.
-    constexpr float MAX_PREDICTION_DISTANCE = 0.05f;  ///< Maximum normalized distance of one prediction.
+    constexpr auto MAX_PREDICTION_DELAY = std::chrono::milliseconds {7};  ///< Maximum time horizon for one prediction.
+    constexpr float MAX_PREDICTION_DISTANCE = 0.075f;  ///< Maximum normalized distance of one prediction.
     constexpr float MAX_PREDICTION_VELOCITY = 12.0f;  ///< Maximum normalized motion velocity in screen lengths per second.
   }  // namespace
 
@@ -39,8 +42,7 @@ namespace input {
       touch_sample_t last_touch;  ///< Most recent real touch sample.
       clock_t::time_point last_arrival;  ///< Host arrival time of the most recent real sample.
       std::optional<clock_t::duration> previous_interval;  ///< Previous real sample interval used for stability checks.
-      std::uint64_t generation {};  ///< Most recent prediction generation for this contact.
-      bool prediction_pending {};  ///< Whether delayed work exists for this contact.
+      std::vector<std::uint64_t> pending_generations;  ///< Generations of delayed predictions for this contact.
     };
 
     std::unordered_map<std::uint32_t, contact_t> contacts;  ///< Active contacts keyed by client pointer ID.
@@ -69,16 +71,15 @@ namespace input {
     };
     const auto invalidate_pending = [&request_cancellation](auto &contacts) {
       for (auto &[pointer_id, contact] : contacts) {
-        if (contact.prediction_pending) {
+        if (!contact.pending_generations.empty()) {
           request_cancellation(pointer_id);
-          contact.prediction_pending = false;
+          contact.pending_generations.clear();
         }
-        ++contact.generation;
         contact.previous_interval.reset();
       }
     };
 
-    if (target_hz != TOUCH_DENSIFICATION_HZ) {
+    if (target_hz != MIN_TOUCH_DENSIFICATION_HZ && target_hz != MAX_TOUCH_DENSIFICATION_HZ) {
       invalidate_pending(impl_->contacts);
       impl_->contacts.clear();
       return result;
@@ -91,10 +92,9 @@ namespace input {
     }
 
     auto existing = impl_->contacts.find(touch.pointer_id);
-    if (existing != impl_->contacts.end() && existing->second.prediction_pending) {
+    if (existing != impl_->contacts.end() && !existing->second.pending_generations.empty()) {
       request_cancellation(touch.pointer_id);
-      existing->second.prediction_pending = false;
-      ++existing->second.generation;
+      existing->second.pending_generations.clear();
     }
 
     if (touch.event_type == LI_TOUCH_EVENT_UP || touch.event_type == LI_TOUCH_EVENT_CANCEL || touch.event_type == LI_TOUCH_EVENT_HOVER ||
@@ -110,7 +110,7 @@ namespace input {
     }
 
     if (touch.event_type == LI_TOUCH_EVENT_DOWN) {
-      impl_->contacts.insert_or_assign(touch.pointer_id, impl_t::contact_t {touch, arrival, std::nullopt, impl_->next_generation++, false});
+      impl_->contacts.insert_or_assign(touch.pointer_id, impl_t::contact_t {touch, arrival, std::nullopt, {}});
       if (impl_->contacts.size() > 1) {
         invalidate_pending(impl_->contacts);
       }
@@ -132,7 +132,7 @@ namespace input {
     if (existing == impl_->contacts.end()) {
       existing = impl_->contacts.insert_or_assign(
                                   touch.pointer_id,
-                                  impl_t::contact_t {touch, arrival, std::nullopt, impl_->next_generation++, false}
+                                  impl_t::contact_t {touch, arrival, std::nullopt, {}}
       )
                    .first;
       return result;
@@ -152,7 +152,9 @@ namespace input {
 
     const auto target_period = std::chrono::duration_cast<clock_t::duration>(std::chrono::duration<double> {1.0 / target_hz});
     const double source_periods = std::chrono::duration<double>(current_interval).count() / std::chrono::duration<double>(target_period).count();
-    const bool source_rate_supported = source_periods >= MIN_SOURCE_PERIODS && source_periods <= MAX_SOURCE_PERIODS;
+    const double ideal_source_periods = static_cast<double>(target_hz) / SOURCE_TOUCH_HZ;
+    const bool source_rate_supported = source_periods >= ideal_source_periods * MIN_SOURCE_PERIOD_RATIO &&
+                                       source_periods <= ideal_source_periods * MAX_SOURCE_PERIOD_RATIO;
 
     bool intervals_stable = false;
     if (contact.previous_interval && current_interval > clock_t::duration::zero() && *contact.previous_interval > clock_t::duration::zero()) {
@@ -176,41 +178,61 @@ namespace input {
       return result;
     }
 
-    const float prediction_scale = static_cast<float>(
-      std::chrono::duration<double>(target_period).count() /
-      std::chrono::duration<double>(current_interval).count()
-    );
-    const float prediction_dx = (touch.x - prior_touch.x) * prediction_scale;
-    const float prediction_dy = (touch.y - prior_touch.y) * prediction_scale;
-    const float prediction_distance = std::hypot(prediction_dx, prediction_dy);
-    if (!std::isfinite(prediction_distance) || prediction_distance <= 0.0f || prediction_distance > MAX_PREDICTION_DISTANCE) {
-      return result;
+    const auto prediction_count = (target_hz / SOURCE_TOUCH_HZ) - 1;
+    result.predictions.reserve(prediction_count);
+    contact.pending_generations.reserve(prediction_count);
+    for (int prediction_index = 1; prediction_index <= prediction_count; ++prediction_index) {
+      const auto prediction_delay = target_period * prediction_index;
+      if (prediction_delay > MAX_PREDICTION_DELAY) {
+        result.predictions.clear();
+        contact.pending_generations.clear();
+        return result;
+      }
+
+      const float prediction_scale = static_cast<float>(
+        std::chrono::duration<double>(prediction_delay).count() /
+        std::chrono::duration<double>(current_interval).count()
+      );
+      const float prediction_dx = (touch.x - prior_touch.x) * prediction_scale;
+      const float prediction_dy = (touch.y - prior_touch.y) * prediction_scale;
+      const float prediction_distance = std::hypot(prediction_dx, prediction_dy);
+      if (!std::isfinite(prediction_distance) || prediction_distance <= 0.0f || prediction_distance > MAX_PREDICTION_DISTANCE) {
+        result.predictions.clear();
+        contact.pending_generations.clear();
+        return result;
+      }
+
+      auto predicted_touch = touch;
+      predicted_touch.x = std::clamp(touch.x + prediction_dx, 0.0f, 1.0f);
+      predicted_touch.y = std::clamp(touch.y + prediction_dy, 0.0f, 1.0f);
+
+      const auto generation = impl_->next_generation++;
+      contact.pending_generations.push_back(generation);
+      result.predictions.push_back(prediction_t {predicted_touch, prediction_delay, generation});
     }
-
-    auto predicted_touch = touch;
-    predicted_touch.x = std::clamp(touch.x + prediction_dx, 0.0f, 1.0f);
-    predicted_touch.y = std::clamp(touch.y + prediction_dy, 0.0f, 1.0f);
-
-    contact.generation = impl_->next_generation++;
-    contact.prediction_pending = true;
-    result.prediction = prediction_t {predicted_touch, target_period, contact.generation};
     return result;
   }
 
   bool touch_densifier_t::consume(std::uint32_t pointer_id, std::uint64_t generation) {
     const auto contact = impl_->contacts.find(pointer_id);
-    if (contact == impl_->contacts.end() || !contact->second.prediction_pending || contact->second.generation != generation) {
+    if (contact == impl_->contacts.end()) {
       return false;
     }
 
-    contact->second.prediction_pending = false;
+    auto &pending_generations = contact->second.pending_generations;
+    const auto pending = std::find(pending_generations.begin(), pending_generations.end(), generation);
+    if (pending == pending_generations.end()) {
+      return false;
+    }
+
+    pending_generations.erase(pending);
     return true;
   }
 
   std::vector<std::uint32_t> touch_densifier_t::reset() {
     std::vector<std::uint32_t> pending_pointer_ids;
     for (const auto &[pointer_id, contact] : impl_->contacts) {
-      if (contact.prediction_pending) {
+      if (!contact.pending_generations.empty()) {
         pending_pointer_ids.push_back(pointer_id);
       }
     }
