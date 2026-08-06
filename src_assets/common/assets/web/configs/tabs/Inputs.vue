@@ -190,6 +190,16 @@ const config = ref(props.config)
               v-model="config.touch_send_to_primary_display"
               default="false"
     ></Checkbox>
+
+    <!-- Experimental native-touch event densification -->
+    <div class="mb-3" v-if="config.mouse === 'enabled' && config.native_pen_touch === 'enabled'">
+      <label for="touch_input_densification_hz" class="form-label">{{ $t('config.touch_input_densification_hz') }}</label>
+      <select id="touch_input_densification_hz" class="form-select" v-model.number="config.touch_input_densification_hz">
+        <option value="0">{{ $t('_common.disabled') }}</option>
+        <option value="240">240 Hz</option>
+      </select>
+      <div class="form-text">{{ $t('config.touch_input_densification_hz_desc') }}</div>
+    </div>
   </div>
 </template>
 

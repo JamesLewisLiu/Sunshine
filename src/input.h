@@ -11,6 +11,7 @@
 // local includes
 #include "platform/common.h"
 #include "thread_safe.h"
+#include "touch_densifier.h"
 
 namespace input {
   struct input_t;

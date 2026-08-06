@@ -717,6 +717,40 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### touch_input_densification_hz
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Experimental native-touch event densification. A value of 240 schedules at most one conservative linear
+            extrapolation between stable real MOVE samples arriving at approximately 120 Hz. Real client events are
+            always injected immediately.
+            Prediction automatically falls back to the original event stream when arrival timing is unstable, the
+            client already sends near the target rate, more than one touch is active, or a DOWN, UP, HOVER, or CANCEL
+            boundary occurs.
+            <br>
+            Synthetic positions cannot restore motion information that the client did not sample. Pressure, contact
+            area, and rotation retain the most recent real values. Currently supported values are 0 (disabled) and
+            240.
+            The predictor uses host arrival time because the current touch protocol carries no event timestamp. Its
+            time horizon, extrapolated distance, and motion velocity are bounded before a synthetic event is accepted.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            0
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            touch_input_densification_hz = 240
+            @endcode</td>
+    </tr>
+</table>
+
 ### keybindings
 
 <table>

@@ -860,6 +860,7 @@ namespace config {
     true,  // high resolution scrolling
     true,  // native pen/touch support
     false,  // send touch input to the primary display
+    0,  // native touch densification disabled
   };
 
   /**
@@ -1805,6 +1806,11 @@ namespace config {
     bool_f(vars, "high_resolution_scrolling", input.high_resolution_scrolling);
     bool_f(vars, "native_pen_touch", input.native_pen_touch);
     bool_f(vars, "touch_send_to_primary_display", input.touch_send_to_primary_display);
+    int_between_f(vars, "touch_input_densification_hz", input.touch_input_densification_hz, {0, 240});
+    if (input.touch_input_densification_hz != 0 && input.touch_input_densification_hz != 240) {
+      BOOST_LOG(warning) << "config: touch_input_densification_hz currently supports only 0 or 240; disabling touch densification"sv;
+      input.touch_input_densification_hz = 0;
+    }
 
     bool_f(vars, "notify_pre_releases", sunshine.notify_pre_releases);
     bool_f(vars, "system_tray", sunshine.system_tray);

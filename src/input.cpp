@@ -38,6 +38,7 @@ using namespace std::literals;
 namespace input {
 
   constexpr auto MAX_GAMEPADS = std::min((std::size_t) platf::MAX_GAMEPADS, sizeof(std::int16_t) * 8);  ///< Maximum gamepads representable by the active gamepad mask.
+
 /**
  * @def DISABLE_LEFT_BUTTON_DELAY
  * @brief Macro for DISABLE LEFT BUTTON DELAY.
@@ -255,6 +256,18 @@ namespace input {
 
     std::list<std::vector<uint8_t>> input_queue;  ///< Pending raw input packets waiting for processing.
     std::mutex input_queue_lock;  ///< Input queue lock.
+
+    /**
+     * @brief Delayed platform injection task for one predicted touch update.
+     */
+    struct touch_prediction_task_t {
+      thread_pool_util::ThreadPool::task_id_t task_id;  ///< Thread-pool task identifier.
+      std::uint64_t generation;  ///< Densifier generation associated with the task.
+    };
+
+    std::mutex touch_densifier_lock;  ///< Protects touch history and delayed-task bookkeeping.
+    touch_densifier_t touch_densifier;  ///< Per-stream conservative touch predictor.
+    std::unordered_map<std::uint32_t, touch_prediction_task_t> touch_prediction_tasks;  ///< Pending predictions by pointer ID.
 
     thread_pool_util::ThreadPool::task_id_t mouse_left_button_timeout;  ///< Mouse left button timeout.
 
@@ -1120,6 +1133,56 @@ namespace input {
   }
 
   /**
+   * @brief Inject a delayed touch prediction if it is still current.
+   *
+   * @param input Shared stream input state.
+   * @param touch_port Touch coordinate bounds captured with the real sample.
+   * @param touch Predicted touch update.
+   * @param generation Densifier generation that scheduled the update.
+   */
+  void inject_predicted_touch(
+    std::shared_ptr<input_t> input,
+    platf::touch_port_t touch_port,
+    platf::touch_input_t touch,
+    std::uint64_t generation
+  ) {
+    std::lock_guard lock(input->touch_densifier_lock);
+    const bool should_inject = input->touch_densifier.consume(touch.pointerId, generation);
+
+    const auto task = input->touch_prediction_tasks.find(touch.pointerId);
+    if (task != input->touch_prediction_tasks.end() && task->second.generation == generation) {
+      input->touch_prediction_tasks.erase(task);
+    }
+
+    if (should_inject) {
+      platf::touch_update(input->client_context.get(), touch_port, touch);
+    }
+  }
+
+  /**
+   * @brief Cancel and invalidate every delayed touch prediction for a stream.
+   *
+   * @param input Shared stream input state.
+   */
+  void cancel_all_touch_predictions(std::shared_ptr<input_t> &input) {
+    std::vector<thread_pool_util::ThreadPool::task_id_t> task_ids;
+    {
+      std::lock_guard lock(input->touch_densifier_lock);
+      static_cast<void>(input->touch_densifier.reset());
+      task_ids.reserve(input->touch_prediction_tasks.size());
+      for (const auto &[pointer_id, task] : input->touch_prediction_tasks) {
+        static_cast<void>(pointer_id);
+        task_ids.push_back(task.task_id);
+      }
+      input->touch_prediction_tasks.clear();
+    }
+
+    for (const auto task_id : task_ids) {
+      task_pool.cancel(task_id);
+    }
+  }
+
+  /**
    * @brief Called to pass a touch message to the platform backend.
    * @param input The input context pointer.
    * @param packet The touch packet.
@@ -1171,8 +1234,65 @@ namespace input {
       contact_area.first,
       contact_area.second,
     };
+    const touch_sample_t touch_sample {
+      touch.eventType,
+      touch.rotation,
+      touch.pointerId,
+      touch.x,
+      touch.y,
+      touch.pressureOrDistance,
+      touch.contactAreaMajor,
+      touch.contactAreaMinor,
+    };
 
-    platf::touch_update(input->client_context.get(), *abs_port, touch);
+    touch_densifier_t::observation_t observation;
+    std::vector<thread_pool_util::ThreadPool::task_id_t> cancelled_task_ids;
+    {
+      std::lock_guard lock(input->touch_densifier_lock);
+      observation = input->touch_densifier.observe(touch_sample, touch_densifier_t::clock_t::now(), config::input.touch_input_densification_hz);
+      for (const auto pointer_id : observation.cancel_pointer_ids) {
+        const auto task = input->touch_prediction_tasks.find(pointer_id);
+        if (task != input->touch_prediction_tasks.end()) {
+          cancelled_task_ids.push_back(task->second.task_id);
+          input->touch_prediction_tasks.erase(task);
+        }
+      }
+
+      // Real events are always injected immediately. Serializing platform updates
+      // with prediction validation prevents a stale task from following a correction.
+      platf::touch_update(input->client_context.get(), *abs_port, touch);
+
+      if (observation.prediction) {
+        const auto prediction = *observation.prediction;
+        const platf::touch_input_t predicted_touch {
+          prediction.touch.event_type,
+          prediction.touch.rotation,
+          prediction.touch.pointer_id,
+          prediction.touch.x,
+          prediction.touch.y,
+          prediction.touch.pressure_or_distance,
+          prediction.touch.contact_area_major,
+          prediction.touch.contact_area_minor,
+        };
+        const auto delayed_task = task_pool.pushDelayed(
+          inject_predicted_touch,
+          prediction.delay,
+          input,
+          *abs_port,
+          predicted_touch,
+          prediction.generation
+        );
+
+        input->touch_prediction_tasks.insert_or_assign(
+          touch.pointerId,
+          input_t::touch_prediction_task_t {delayed_task.task_id, prediction.generation}
+        );
+      }
+    }
+
+    for (const auto task_id : cancelled_task_ids) {
+      task_pool.cancel(task_id);
+    }
   }
 
   /**
@@ -1838,6 +1958,7 @@ namespace input {
    * @brief Reset the object to its initial empty state.
    */
   void reset(std::shared_ptr<input_t> &input) {
+    cancel_all_touch_predictions(input);
     task_pool.cancel(key_press_repeat_id);
     task_pool.cancel(input->mouse_left_button_timeout);
 
