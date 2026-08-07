@@ -45,7 +45,7 @@ TEST(InputTouchDensifierTest, Stable120HzMovementProducesOne240HzPrediction) {
   EXPECT_NEAR(prediction.touch.x, 0.20f, 0.001f);
   EXPECT_FLOAT_EQ(prediction.touch.y, 0.0f);
   EXPECT_EQ(prediction.touch.pressure_or_distance, 0.5f);
-  EXPECT_NEAR(std::chrono::duration<double, std::milli>(prediction.delay).count(), 4.1667, 0.001);
+  EXPECT_NEAR((std::chrono::duration<double, std::milli>(prediction.delay).count()), 4.1667, 0.001);
   EXPECT_TRUE(densifier.consume(1, prediction.generation));
   EXPECT_FALSE(densifier.consume(1, prediction.generation));
 }
@@ -66,9 +66,9 @@ TEST(InputTouchDensifierTest, Stable120HzMovementProducesThree480HzPredictions) 
   EXPECT_NEAR(observation.predictions[0].touch.x, 0.09f, 0.001f);
   EXPECT_NEAR(observation.predictions[1].touch.x, 0.10f, 0.001f);
   EXPECT_NEAR(observation.predictions[2].touch.x, 0.11f, 0.001f);
-  EXPECT_NEAR(std::chrono::duration<double, std::milli>(observation.predictions[0].delay).count(), 2.0833, 0.001);
-  EXPECT_NEAR(std::chrono::duration<double, std::milli>(observation.predictions[1].delay).count(), 4.1667, 0.001);
-  EXPECT_NEAR(std::chrono::duration<double, std::milli>(observation.predictions[2].delay).count(), 6.25, 0.001);
+  EXPECT_NEAR((std::chrono::duration<double, std::milli>(observation.predictions[0].delay).count()), 2.0833, 0.001);
+  EXPECT_NEAR((std::chrono::duration<double, std::milli>(observation.predictions[1].delay).count()), 4.1667, 0.001);
+  EXPECT_NEAR((std::chrono::duration<double, std::milli>(observation.predictions[2].delay).count()), 6.25, 0.001);
   for (const auto &prediction : observation.predictions) {
     EXPECT_TRUE(densifier.consume(1, prediction.generation));
   }
