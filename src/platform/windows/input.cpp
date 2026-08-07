@@ -174,6 +174,14 @@ namespace platf {
     return pointer_flags;
   }
 
+  std::uint32_t win_input::prepare_touch_pointer_repeat_frame(std::uint32_t pointer_flags) {
+    if (pointer_flags == POINTER_FLAG_NONE) {
+      return POINTER_FLAG_NONE;
+    }
+
+    return finish_touch_pointer_frame(pointer_flags) | POINTER_FLAG_UPDATE;
+  }
+
   bool win_input::touch_pointer_blocks_primary_designation(std::uint32_t pointer_flags) {
     return pointer_flags & (POINTER_FLAG_INCONTACT | POINTER_FLAG_PRIMARY);
   }
@@ -1084,9 +1092,27 @@ namespace platf {
    * @param raw The raw client-specific input context.
    */
   void repeat_touch(client_input_raw_t *raw) {
+    // Released pointers can leave empty slots until the next client update. Compact first so the
+    // keepalive contains only active pointers and satisfies the synthetic touch frame contract.
+    perform_touch_compaction(raw);
+    if (raw->activeTouchSlots == 0) {
+      raw->touchRepeatTask = nullptr;
+      return;
+    }
+
+    for (UINT32 i = 0; i < raw->activeTouchSlots; ++i) {
+      auto &pointer_flags = raw->touchInfo[i].touchInfo.pointerInfo.pointerFlags;
+      pointer_flags = win_input::prepare_touch_pointer_repeat_frame(pointer_flags);
+    }
+
     if (!inject_synthetic_pointer_input(raw->global, raw->touch, raw->touchInfo, raw->activeTouchSlots)) {
       auto err = GetLastError();
       BOOST_LOG(warning) << "Failed to refresh virtual touch input: "sv << err;
+    }
+
+    for (UINT32 i = 0; i < raw->activeTouchSlots; ++i) {
+      auto &pointer_flags = raw->touchInfo[i].touchInfo.pointerInfo.pointerFlags;
+      pointer_flags = win_input::finish_touch_pointer_frame(pointer_flags);
     }
 
     raw->touchRepeatTask = task_pool.pushDelayed(repeat_touch, ISPI_REPEAT_INTERVAL, raw).task_id;

@@ -82,6 +82,16 @@ namespace platf::win_input {
   std::uint32_t finish_touch_pointer_frame(std::uint32_t pointer_flags);
 
   /**
+   * @brief Prepare persistent touch state for a synthetic keepalive frame.
+   * @details Active touch and hover pointers must be submitted as explicit update frames so Windows keeps the
+   * interaction alive. Empty pointer slots remain empty.
+   *
+   * @param pointer_flags Persistent pointer flags retained after the previous frame.
+   * @return Pointer flags for a valid synthetic touch update frame.
+   */
+  std::uint32_t prepare_touch_pointer_repeat_frame(std::uint32_t pointer_flags);
+
+  /**
    * @brief Determine whether a touch pointer prevents a new primary contact from being designated.
    *
    * @param pointer_flags Current Windows pointer flags for a touch pointer.

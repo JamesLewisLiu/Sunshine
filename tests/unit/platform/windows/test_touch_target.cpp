@@ -236,6 +236,24 @@ TEST(WindowsTouchPointerFlagsTest, ContactMoveRetainsMouseCompatibility) {
   EXPECT_TRUE(persistent_flags & POINTER_FLAG_FIRSTBUTTON);
 }
 
+TEST(WindowsTouchPointerFlagsTest, RepeatContactIsAnExplicitUpdateFrame) {
+  constexpr std::uint32_t persistent_flags =
+    POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_FIRSTBUTTON | POINTER_FLAG_PRIMARY;
+
+  const auto repeat_flags = platf::win_input::prepare_touch_pointer_repeat_frame(persistent_flags);
+
+  EXPECT_TRUE(repeat_flags & POINTER_FLAG_UPDATE);
+  EXPECT_TRUE(repeat_flags & POINTER_FLAG_INRANGE);
+  EXPECT_TRUE(repeat_flags & POINTER_FLAG_INCONTACT);
+  EXPECT_TRUE(repeat_flags & POINTER_FLAG_FIRSTBUTTON);
+  EXPECT_TRUE(repeat_flags & POINTER_FLAG_PRIMARY);
+  EXPECT_EQ(platf::win_input::finish_touch_pointer_frame(repeat_flags), persistent_flags);
+}
+
+TEST(WindowsTouchPointerFlagsTest, RepeatFrameDoesNotReactivateEmptyPointer) {
+  EXPECT_EQ(platf::win_input::prepare_touch_pointer_repeat_frame(POINTER_FLAG_NONE), POINTER_FLAG_NONE);
+}
+
 TEST(WindowsTouchPointerFlagsTest, PrimaryReleaseIsInjectedBeforeDesignationIsCleared) {
   constexpr std::uint32_t event_flags = POINTER_FLAG_UP | POINTER_FLAG_FIRSTBUTTON | POINTER_FLAG_PRIMARY;
 
